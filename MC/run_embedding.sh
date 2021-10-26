@@ -5,7 +5,7 @@ set -x
 MODULES="PIPE ITS TPC TRD TOF"
 BKGEVENTS=200
 SIGEVENTS=1000
-NWORKERS=12
+NWORKERS=$(grep 'cpu[0-9]' /proc/stat | wc -l)
 
 export O2DPG_ROOT=$PWD
 
