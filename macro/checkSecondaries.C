@@ -18,10 +18,11 @@ using Cascade = o2::dataformats::Cascade;
 using RRef = o2::dataformats::RangeReference<int, int>;
 using VBracket = o2::math_utils::Bracket<int>;
 
-void checkSecondaries(std::string secFile = "o2_secondary_vertex.root") {
+
+void checkSecondaries(std::string secFile = "o2_secondary_vertex.root")
+{
 
   // TH1F *histM2 = new TH1F("v0m2", "m2", 500, 0., 20.);
-  TH1D *histPDG = new TH1D("recoPDGITS", "Reconstrcuted ITS PDG", 3, 0, 3);
   auto fMCTracks = TFile::Open("sgn_Kine.root");
   auto fSecondaries = TFile::Open(secFile.data());
   auto fITS = TFile::Open("o2trac_its.root");
@@ -33,9 +34,15 @@ void checkSecondaries(std::string secFile = "o2_secondary_vertex.root") {
   auto treeMCTracks = (TTree *)fMCTracks->Get("o2sim");
   auto treeSecondaries = (TTree *)fSecondaries->Get("o2sim");
   auto treeITS = (TTree *)fITS->Get("o2sim");
+  auto treeITSTPC = (TTree *)fITSTPC->Get("matchTPCITS");
+  auto treeITSTPCTOF = (TTree *)fITSTPCTOF->Get("matchTOF");
 
   // labels
   std::vector<o2::MCCompLabel> *labITSvec = nullptr;
+  std::vector<o2::MCCompLabel> *labITSTPCvec = nullptr;
+  std::vector<o2::MCCompLabel> *labITSTPCTOFvec = nullptr;
+
+
   // std::vector<TrackITS> *recArr = nullptr;
   std::vector<o2::MCTrack> *MCtracks = nullptr;
   std::vector<V0> *v0vec = nullptr;
@@ -43,52 +50,78 @@ void checkSecondaries(std::string secFile = "o2_secondary_vertex.root") {
   std::vector<Cascade> *cascvec = nullptr;
   std::vector<RRef> *casc2PVvec = nullptr;
 
-  treeMCTracks->SetBranchAddress("MCTrack", &MCtracks);
-  treeITS->SetBranchAddress("ITSTrackMCTruth", &labITSvec);
   treeSecondaries->SetBranchAddress("V0s", &v0vec);
-  // treeSecondaries->SetBranchAddress("PV2V0Refs", &v02PVvec);
-  // treeSecondaries->SetBranchAddress("Cascades", &cascvec);
-  // treeSecondaries->SetBranchAddress("PV2CascRefs", &casc2PVvec);
+  treeMCTracks->SetBranchAddress("MCTrack", &MCtracks);
 
-  // custom containers
+  treeITS->SetBranchAddress("ITSTrackMCTruth", &labITSvec);
+  treeITSTPC->SetBranchAddress("MatchMCTruth", &labITSTPCvec);
+  treeITSTPCTOF->SetBranchAddress("MatchTOFMCTruth", &labITSTPCTOFvec);
+
+
+  // fill MC matrix
+
   std::vector<std::vector<o2::MCTrack>> mcTracksMatrix;
 
   auto nev = treeMCTracks->GetEntriesFast();
 
   mcTracksMatrix.resize(nev);
-  for (int n = 0; n < nev; n++) { // loop over MC events
+  for (int n = 0; n < nev; n++)
+  { // loop over MC events
     treeMCTracks->GetEvent(n);
     mcTracksMatrix[n].resize(MCtracks->size());
-    for (unsigned int mcI{0}; mcI < MCtracks->size(); ++mcI) {
+    for (unsigned int mcI{0}; mcI < MCtracks->size(); ++mcI)
+    {
       mcTracksMatrix[n][mcI] = MCtracks->at(mcI);
     }
   }
 
-  for (int frame = 0; frame < treeITS->GetEntriesFast(); frame++) {
-    if (!treeITS->GetEvent(frame)) {
-      continue;
-    }
-    for (unsigned int iTrack{0}; iTrack < labITSvec->size(); ++iTrack) {
-      auto lab = labITSvec->at(iTrack);
-      int trackID, evID, srcID;
-      bool fake;
-      lab.get(trackID, evID, srcID, fake);
-      if (!lab.isNoise() && lab.isValid()) {
-        std::cout << mcTracksMatrix[evID][trackID].GetPdgCode() << std::endl;
-        int ent = 0;
-        switch (mcTracksMatrix[evID][trackID].GetPdgCode()) {
-        case 1000020030:
-          ent = 1;
-          break;
-        case 1010010030:
-          ent = 2;
-          break;
+  auto doMatching = [&](TTree * treeDetectors, std::vector<o2::MCCompLabel> * labDetectors, TH1D * histo)
+  {
+    for (int frame = 0; frame < treeDetectors->GetEntriesFast(); frame++)
+    {
+      if (!treeDetectors->GetEvent(frame))
+      {
+        continue;
+      }
+      for (unsigned int iTrack{0}; iTrack < labDetectors->size(); ++iTrack)
+      {
+        auto lab = labDetectors->at(iTrack);
+        int trackID, evID, srcID;
+        bool fake;
+        lab.get(trackID, evID, srcID, fake);
+        if (!lab.isNoise() && lab.isValid())
+        {
+          // std::cout << mcTracksMatrix[evID][trackID].GetPdgCode() << std::endl;
+          int ent = 0;
+          switch (mcTracksMatrix[evID][trackID].GetPdgCode())
+          {
+          case 1000020030:
+            ent = 1;
+            break;
+          case 1010010030:
+            ent = 2;
+            break;
+          }
+          histo->Fill(ent);
         }
-        histPDG->Fill(ent);
       }
     }
-  }
-  histPDG->Draw();
+  };
+
+  TH1D *histPDGits = new TH1D("recoPDGits", "Reconstructed ITS PDG", 3, 0, 3);
+  TH1D *histPDGitsTPC = new TH1D("recoPDGitsTPC", "Reconstructed ITS+TPC PDG", 3, 0, 3);
+  TH1D *histPDGitsTPCtof = new TH1D("recoPDGitsTPCtof", "Reconstructed ITS+TPC+TOF PDG", 3, 0, 3);
+
+  doMatching( treeITS, labITSvec, histPDGits); // match and fill PDG histo of its tracks
+  doMatching( treeITSTPC, labITSTPCvec, histPDGitsTPC); // match and fill PDG histo of its+tpc tracks
+  doMatching( treeITSTPCTOF, labITSTPCTOFvec, histPDGitsTPCtof); // match and fill PDG histo of its+tpc+tof tracks
+
+  auto outFile = TFile("CheckSecondaries.root", "recreate");
+  histPDGits->Write();
+  histPDGitsTPC->Write();
+  histPDGitsTPCtof->Write();
+  outFile.Close();
+
   // for (auto &v0 : *v0vec)
   // {
   //     // printf("%d %d %d \n", v0.posTrack().collisionId(),
