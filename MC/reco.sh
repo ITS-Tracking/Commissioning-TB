@@ -6,4 +6,4 @@ o2-trd-global-tracking --shm-segment-size 10000000000 -b
 o2-tof-reco-workflow --shm-segment-size 10000000000 -b
 o2-tof-matcher-workflow --shm-segment-size 10000000000 -b
 o2-primary-vertexing-workflow --vertex-track-matching-sources ITS,TPC,ITS-TPC,TPC-TOF,ITS-TPC-TOF -b
-o2-secondary-vertexing-workflow --shm-segment-size 10000000000 -b
+o2-secondary-vertexing-workflow --vertexing-sources ITS,TPC,ITS-TPC,TPC-TOF,ITS-TPC-TOF --shm-segment-size 10000000000 -b
