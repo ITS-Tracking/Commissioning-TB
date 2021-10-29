@@ -58,6 +58,8 @@ void k0_data(std::string secFile = "o2trac_its.root", std::string pvFileName = "
 	TH1D *histInvMass = new TH1D("k0", "k0s rec mass", 80, 0.4, 0.6);
 	TH1D *histInvMassLS = new TH1D("LS", "rec LS", 80, 0.4, 0.6);
 	TH1D *cosPAH = new TH1D("cosPA", ";cos(#theta_{P})", 1000, 0.9, 1.);
+	TH1D *cosPAHls = new TH1D("cosPAls", ";cos(#theta_{P})", 1000, 0.9, 1.);
+	cosPAHls->SetLineColor(kRed);
 
 	o2::vertexing::DCAFitterN<2> mFitterV0;
 	mFitterV0.setBz(2);
@@ -120,7 +122,7 @@ void k0_data(std::string secFile = "o2trac_its.root", std::string pvFileName = "
 					std::array<float, 3> p;
 					TLorentzVector moth, prong;
 
-					Vec3 pMom{0.f,0.f,0.f};
+					Vec3 pMom{0.,0.,0.};
 					for (int i = 0; i < mFitterV0.getNProngs(); i++)
 					{
 						const auto &trc = mFitterV0.getTrack(i);
@@ -137,7 +139,7 @@ void k0_data(std::string secFile = "o2trac_its.root", std::string pvFileName = "
 					for (auto& pv : pvROFs[rofId]) {
 						auto delta = pv - sv;
 						double cosPA{ROOT::Math::Dot(delta,pMom) / ROOT::Math::Mag(delta) / ROOT::Math::Mag(pMom)};
-						cosPAH->Fill(cosPA);
+						(track1.getSign() != track2.getSign() ? cosPAH : cosPAHls)->Fill(cosPA);
 						survives = cosPA > 0.999;
 						if (survives) break;
 					}
@@ -164,6 +166,9 @@ void k0_data(std::string secFile = "o2trac_its.root", std::string pvFileName = "
 	histInvMassLS->Scale(integral / integralLS);
 	histInvMassLS->Draw("same");
 	cv.Write();
+	histInvMass->Write();
+	histInvMassLS->Write();
 	cosPAH->Write();
+	cosPAHls->Write();
 	outFile.Close();
 }
