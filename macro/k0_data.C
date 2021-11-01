@@ -34,8 +34,9 @@ std::vector<double> selectV0Candidate(o2::vertexing::DCAFitterN<2> mFitterV0, Ve
 double getCosPA(o2::vertexing::DCAFitterN<2> mFitterV0, Vec3 pV);
 bool doMCmatching(std::vector<o2::MCCompLabel> *MClabel, std::vector<std::vector<o2::MCTrack>> mcTracksMatrix, int i, int j);
 
-void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileName = "505548/o2_primary_vertex.root")
+void k0_data(std::string secFile = "../sim/o2trac_its.root", std::string pvFileName = "../sim/o2_primary_vertex.root")
 {
+
   bool isMC = false;
 
   auto fSecondaries = TFile::Open(secFile.data());
@@ -84,11 +85,16 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
   pvTree->SetBranchAddress("PVTrackIndices", &pvIdx);
 
   auto outFile = TFile("k0_inv_mass.root", "recreate");
-  TH1D *histInvMass = new TH1D("k0", "k0s rec mass", 80, 0.3, 0.8);
+  TH1D *histInvMass = new TH1D("k0", "k0s rec mass; M_{#pi^{+}#pi^{-}}(GeV/c^{2}); Counts", 80, 0.3, 0.8);
   TH1D *histInvMassLS = new TH1D("LS", "rec LS", 80, 0.3, 0.8);
   TH1D *cosPAH = new TH1D("cosPA", ";cos(#theta_{P})", 1000, -1, 1.);
-  TH1D *cosPAHls = new TH1D("cosPAls", ";cos(#theta_{P})", 1000, -1, 1.);
-  TH1D *partPerRoFrame = new TH1D("", ";ITS Tracks per RoFrame", 80, 1, 80.);
+  TH1D *cosPAHls = new TH1D("cosPAls", ";cos(#theta_{P}); Counts", 1000, -1, 1.);
+  TH1D *DCAhist = new TH1D("DCA", ";DCA tracks", 1000, 0., 0.3);
+  TH1D *primaryVertexZ = new TH1D("Primary Vertex Z coordinate", "; PV z coordinate (cm); Counts", 1000, 0., 70.);
+  // TH1D *primaryVertexZ = new TH1D("Primary Vertex Z coordinate", "; PV z coordinate (cm); Counts", 1000, 0., 2.);
+
+  TH1D *partPerRoFrame = new TH1D("ITS Tracks per ROframe", "ITS Tracks per ROframe; ITS Tracks per ROframe; Counts", 80, 1, 80.);
+  TH1D *verticesPerRoFrame = new TH1D("Primary Vertices per ROframe", "Primary Vertices per ROframe; Primary Vertices per ROframe; Counts", 4, 1, 5.);
 
   cosPAHls->SetLineColor(kRed);
 
@@ -133,6 +139,7 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
         if (count > 0)
         {
           pvROFs[rofId].push_back({pv.getX(), pv.getY(), pv.getZ()});
+          primaryVertexZ->Fill(pv.getZ());
         }
       }
     }
@@ -140,10 +147,12 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
     for (size_t rofId{0}; rofId < rofArr->size(); ++rofId)
     {
       auto &rof = rofArr->at(rofId);
-      std::cout << rof.getNEntries() << std::endl;
       int trackStart = rof.getFirstEntry();
       int trackStop = trackStart + rof.getNEntries();
+
       partPerRoFrame->Fill(rof.getNEntries());
+      verticesPerRoFrame->Fill(pvROFs[rofId].size());
+
       for (int i = trackStart; i < trackStop; i++)
       {
 
@@ -155,20 +164,28 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
           {
             bool isMatched = doMCmatching(labITSvec, mcTracksMatrix, i, j);
             // if (!isMatched)
-            //   continue;
+            // continue;
+          }
+          int nCand;
+          try
+          {
+            nCand = mFitterV0.process(track1, track2);
+          }
+          catch (std::runtime_error &e)
+          {
           }
 
-          int nCand = mFitterV0.process(track1, track2);
           if (!nCand)
             continue;
 
           mFitterV0.propagateTracksToVertex();
 
           Vec3 selPv{0., 0., 0.};
-          double prevCosPA{-1.};
+          double prevCosPA{0.};
+          double newCosPA;
           for (auto &pv : pvROFs[rofId])
           {
-            double newCosPA = getCosPA(mFitterV0, pv);
+            newCosPA = getCosPA(mFitterV0, pv);
             if (std::abs(newCosPA) > std::abs(prevCosPA))
             {
               selPv[0] = pv[0];
@@ -178,18 +195,23 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
             prevCosPA = newCosPA;
           }
 
+          (track1.getSign() != track2.getSign() ? cosPAH : cosPAHls)->Fill(newCosPA);
+
           std::vector<double> outVector = selectV0Candidate(mFitterV0, selPv);
           if (outVector[0] == -1)
+          {
             continue;
+          }
 
           double M = outVector[0];
           double cosPA = outVector[1];
-
-          (track1.getSign() != track2.getSign() ? cosPAH : cosPAHls)
-              ->Fill(cosPA);
+          double dcaTracks = outVector[2];
 
           if (track1.getSign() != track2.getSign())
+          {
+            DCAhist->Fill(dcaTracks);
             histInvMass->Fill(M);
+          }
           else
             histInvMassLS->Fill(M);
         }
@@ -213,6 +235,9 @@ void k0_data(std::string secFile = "505548/o2trac_its.root", std::string pvFileN
   cosPAH->Write();
   cosPAHls->Write();
   partPerRoFrame->Write();
+  verticesPerRoFrame->Write();
+  DCAhist->Write();
+  primaryVertexZ->Write();
   outFile.Close();
 }
 
@@ -244,14 +269,6 @@ bool doMCmatching(std::vector<o2::MCCompLabel> *MClabel, std::vector<std::vector
   }
   if (motherID[0] == motherID[1] && vEvID[0] == vEvID[1] && mcTracksMatrix[vEvID[1]][motherID[1]].GetPdgCode() == 310)
   {
-    // std::cout<< "------------" << std::endl;
-
-    // std::cout<<vEvID[0] << std::endl;
-    // std::cout<<vEvID[1] << std::endl;
-
-    // std::cout<< vPDG[0] << std::endl;
-    // std::cout<< vPDG[1] << std::endl;
-
     return true;
   }
   return false;
@@ -288,7 +305,8 @@ std::vector<double> selectV0Candidate(o2::vertexing::DCAFitterN<2> mFitterV0, Ve
 
   auto sv = mFitterV0.getPCACandidate();
 
-  auto delta = pV - sv;
+  Vec3 delta = pV - sv;
+  auto delta2 = delta[0] * delta[0] + delta[1] * delta[1];
 
   std::array<float, 3> p;
   TLorentzVector moth, prong;
@@ -305,6 +323,9 @@ std::vector<double> selectV0Candidate(o2::vertexing::DCAFitterN<2> mFitterV0, Ve
     pMom[2] += p[2];
   }
 
+  double pt2V0 = moth[0] * moth[0] + moth[1] * moth[1], prodXYv0 = delta[0] * moth[0] + delta[1] * moth[1], tDCAXY = prodXYv0 / pt2V0;
+  double dcaX = delta[0] - moth[0] * tDCAXY, dcaY = delta[1] - moth[1] * tDCAXY, dca2 = dcaX * dcaX + dcaY * dcaY;
+
   double cosPA{ROOT::Math::Dot(delta, pMom) / ROOT::Math::Mag(delta) / ROOT::Math::Mag(pMom)};
 
   auto &track0 = mFitterV0.getTrack(0);
@@ -313,12 +334,21 @@ std::vector<double> selectV0Candidate(o2::vertexing::DCAFitterN<2> mFitterV0, Ve
   double dca_tracks = mFitterV0.getChi2AtPCACandidate();
   std::vector<double> outVec;
 
-  if (std::abs(cosPA) < 0.9 || dca_tracks > 0.1)
+  if (std::abs(cosPA) < 0.99 || dca_tracks > 0.5 || delta2 < 1 || dca2 > 0.2 * 0.2 || pt2V0 < 0.1)
+  {
     outVec.push_back(-1);
+  }
+
+  else if (!mFitterV0.isPropagateTracksToVertexDone() && !mFitterV0.propagateTracksToVertex())
+  {
+    outVec.push_back(-1);
+  }
+
   else
   {
     outVec.push_back(moth.M());
     outVec.push_back(cosPA);
+    outVec.push_back(dca_tracks);
   }
 
   return outVec;
