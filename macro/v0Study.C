@@ -34,7 +34,7 @@ const int secondDaughterPDG = -211;
 // const int firstDaughterPDG = 2212;
 // const int secondDaughterPDG = -211;
 
-bool getITSTrack(int motherEvID, int motherTrackID, TTree *ITStree, std::vector<o2::MCCompLabel> *ITSlabel, std::vector<o2::its::TrackITS> *ITStrack);
+o2::its::TrackITS *getITSTrack(int motherEvID, int motherTrackID, TTree *ITStree, std::vector<o2::MCCompLabel> *ITSlabel, std::vector<o2::its::TrackITS> *ITStrack);
 void doMatching(const std::vector<std::vector<o2::MCTrack>> &mcTracksMatrix, TTree *treeDetectors, std::vector<o2::MCCompLabel> *labDetectors, TH1D *histo);
 double calcMass(const V0 &v0, double dauMass[2], int dauCharges[2]);
 double calcDecLength(std::vector<MCTrack> *MCTracks, const MCTrack &motherTrack, int dauPDG);
@@ -72,8 +72,10 @@ void v0Study()
     hists[3] = new TH1D("recoPDGitsTPCTOF", "Reconstructed ITS-TPC-TOF PDG;;Efficiency", 3, 0, 3);
     TH1D *histInvMass = new TH1D("V0 invariant mass", "; V0 Mass (GeV/c^{2}); Counts", 30, bins[0], bins[1]);
     TH1D *histV0radius = new TH1D("V0 radius", "; V0 Radius (cm); Counts", 30, 0, 40);
+    TH1D *histITSHits = new TH1D("V0 candidate ITS hits", "ITS hits; Layer Number; #Hits", 7, -0.5, 6.5);
+    TH1D *histITScounter = new TH1D("V0 candidate ITS hits and tracks counter", ";; Counts/(# of V0s)", 3, 0, 3);
 
-    auto fMCTracks = TFile::Open("o2sim_Kine.root");
+    auto fMCTracks = TFile::Open("sgn_Kine.root");
     auto fSecondaries = TFile::Open("o2_secondary_vertex.root");
     auto fITS = TFile::Open("o2trac_its.root");
     auto fITSTPC = TFile::Open("o2match_itstpc.root");
@@ -193,6 +195,7 @@ void v0Study()
         std::cout << "---------------------------------" << std::endl;
 
         counter++;
+        std::cout << "Counter: " << counter << std::endl;
         std::cout << evIDvec[0] << ", " << motherIDvec[0] << ", " << motherIDvec[1] << std::endl;
         std::cout << "Common mother found, PDG: " << mcTracksMatrix[evIDvec[0]][motherIDvec[0]].GetPdgCode() << std::endl;
         std::cout << "Daughter 0, PDG: " << pdg0 << ", Pt: " << mcTracksMatrix[evIDvec[0]][daughterIDvec[0]].GetPt() << std::endl;
@@ -200,11 +203,22 @@ void v0Study()
 
         std::cout << "Daughter 1, PDG: " << pdg1 << ", Pt: " << mcTracksMatrix[evIDvec[0]][daughterIDvec[1]].GetPt() << std::endl;
         std::cout << "Daughter 1, Rec Pt: " << v0.getProng(1).getPt() << ", Track type: " << v0.getProngID(1).getSourceName() << std::endl;
-
-        getITSTrack(evIDvec[0], motherIDvec[0], treeITS, labITSvec, ITStracks);
         auto motherTrack = mcTracksMatrix[evIDvec[0]][motherIDvec[0]];
-        std::cout << "Did ITS see mother track (hits)? : " << motherTrack.leftTrace(0) << std::endl;
-        std::cout << "Counter: " << counter << std::endl;
+
+        if (motherTrack.leftTrace(0))
+        {
+            histITScounter->Fill(0);
+            std::cout << "ITS sees mother hits! " << std::endl;
+            o2::its::TrackITS* motherITStrack = getITSTrack(evIDvec[0], motherIDvec[0], treeITS, labITSvec, ITStracks);
+            if (motherITStrack != nullptr)
+                motherITStrack->getNFakeClusters()>0 ? histITScounter->Fill(2) : histITScounter->Fill(1);
+        }
+    }
+    histITScounter->Scale(1/double(counter));
+    const char *labHits[3] = {"Has at least 1 ITS hit", "Has ITS track w/o fake", "Has ITS track w/ fake"};
+    for (auto iLab{0}; iLab < 3; ++iLab)
+    {
+        histITScounter->GetXaxis()->SetBinLabel(iLab + 1, labHits[iLab]);
     }
 
     const char *labels[3] = {std::to_string(motherPDG).data(), std::to_string(firstDaughterPDG).data(), std::to_string(secondDaughterPDG).data()};
@@ -220,12 +234,15 @@ void v0Study()
     }
     histInvMass->Write();
     histV0radius->Write();
+    histITSHits->Write();
+    histITScounter->Write();
     outFile.Close();
 }
 
-bool getITSTrack(int motherEvID, int motherTrackID, TTree *ITStree, std::vector<o2::MCCompLabel> *ITSlabel, std::vector<o2::its::TrackITS> *ITStrack)
+o2::its::TrackITS *getITSTrack(int motherEvID, int motherTrackID, TTree *ITStree, std::vector<o2::MCCompLabel> *ITSlabel, std::vector<o2::its::TrackITS> *ITStrack)
 {
-    // o2::its::TrackITS *motherTrack{nullptr};
+    o2::its::TrackITS *motherTrack{nullptr};
+
     for (int frame = 0; frame < ITStree->GetEntriesFast(); frame++)
     {
         if (!ITStree->GetEvent(frame) || !ITStree->GetEvent(frame))
@@ -244,13 +261,14 @@ bool getITSTrack(int motherEvID, int motherTrackID, TTree *ITStree, std::vector<
             {
                 if (evID == motherEvID and trackID == motherTrackID)
                 {
-                    auto motherTrack = ITStrack->at(iTrack);
-                    std::cout << "ITS track found! " << std::endl;
+                    motherTrack = &ITStrack->at(iTrack);
+                    std::cout << "ITS sees mother track! " << std::endl;
+                    return motherTrack;
                 }
             }
         }
-    }
-    return 0;
+    }    
+    return motherTrack;
 };
 
 void doMatching(const std::vector<std::vector<o2::MCTrack>> &mcTracksMatrix, TTree *treeDetectors,
@@ -269,7 +287,7 @@ void doMatching(const std::vector<std::vector<o2::MCTrack>> &mcTracksMatrix, TTr
             int trackID, evID, srcID;
             bool fake;
             lab.get(trackID, evID, srcID, fake);
-            if (!lab.isNoise() && lab.isValid())
+            if (!lab.isNoise() && lab.isValid() && lab.isCorrect())
             {
                 int ent = -1;
                 switch (mcTracksMatrix[evID][trackID].GetPdgCode())
