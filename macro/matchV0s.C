@@ -19,6 +19,8 @@
 #include "TCanvas.h"
 #include "TFile.h"
 #include "TH1F.h"
+#include "TH2D.h"
+
 #include "TMath.h"
 #include "TString.h"
 #include "TTree.h"
@@ -48,15 +50,16 @@ const int secondDaughterPDG = -211;
 
 std::vector<std::array<int, 2>> matchV0stoMC(const std::vector<std::vector<o2::MCTrack>> &mcTracksMatrix, std::map<std::string, std::vector<o2::MCCompLabel> *> &map, std::vector<V0> *v0vec);
 std::array<int, 2> matchITStracktoMC(const std::vector<std::vector<o2::MCTrack>> &mcTracksMatrix, o2::MCCompLabel ITSlabel);
-std::vector<ITSCluster> getTrackClusters(const o2::its::TrackITS &ITStrack,const std::vector<ITSCluster> &ITSClustersArray, std::vector<int> *ITSTrackClusIdx);
+std::vector<ITSCluster> getTrackClusters(const o2::its::TrackITS &ITStrack, const std::vector<ITSCluster> &ITSClustersArray, std::vector<int> *ITSTrackClusIdx);
 
 void matchV0s()
 {
     // Output Histograms
     TH1D *hChi2Sgn = new TH1D("Chi2 Signal", "; #chi^{2}; Counts", 102, -2, 100);
     TH1D *hChi2Bkg = new TH1D("Chi2 background", "; #chi^{2} (90 is default for overflows and not propagated); Counts", 102, -2, 100);
-
-    TH1D *histITSHits = new TH1D("V0 candidate ITS hits", "ITS hits; Layer Number; #Hits", 7, -0.5, 6.5);
+    TH1D *hSigBkg = new TH1D("Hypertracker eff", "; ; Efficiency", 2, 0, 2);
+    TH2D *hPtResBef = new TH2D("pT resolution before hypertracking", "; #it{p}_{T}^{gen} (GeV); (#it{p}_{T}^{gen} - #it{p}_{T}^{rec})/#it{p}_{T}^{gen}; Counts", 20, 0, 10, 20, -1, 1);
+    TH2D *hPtResAft = new TH2D("pT resolution before hypertracking", "; #it{p}_{T}^{gen} (GeV); (#it{p}_{T}^{gen} - #it{p}_{T}^{rec})/#it{p}_{T}^{gen}; Counts", 20, 0, 10, 20, -1, 1);
 
     // Files
     auto fMCTracks = TFile::Open("sgn_Kine.root");
@@ -156,6 +159,9 @@ void matchV0s()
     o2::vertexing::DCAFitterN<2> mFitterV0;
     mFitterV0.setBz(-5);
 
+    auto sig_counter = 0.;
+    auto bkg_counter = 0.;
+
     // Starting matching  loop
     for (int frame = 0; frame < treeITS->GetEntriesFast(); frame++)
     {
@@ -165,7 +171,7 @@ void matchV0s()
         {
             continue;
         }
-        auto counter = 0.;
+
         for (unsigned int iTrack{0}; iTrack < labITSvec->size(); ++iTrack)
         {
             auto lab = labITSvec->at(iTrack);
@@ -181,31 +187,69 @@ void matchV0s()
 
                 if (ITStrackMCref == v0MCref && ITStrackMCref[0] != -1)
                 {
+
+                    auto &mcTrack = mcTracksMatrix[v0MCref[0]][v0MCref[1]];
+                    sig_counter++;
                     auto hyperTrack = hyperTracker(ITStrack, v0, ITSclusters, gman, mFitterV0);
+                    hyperTrack.setBz(-5.);
+                    // hyperTrack.setNclusMatching(ITSclusters.size());
+                    hyperTrack.setMaxChi2(40);
                     auto chi2 = hyperTrack.getMatchingChi2();
-                    hChi2Sgn->Fill(chi2);
                     std::cout << "V0 orig Pt: " << v0.getPt() << ", V0 recr Pt: " << hyperTrack.getV0().getPt() << std::endl;
+                    hPtResBef->Fill(mcTrack.GetPt(), (mcTrack.GetPt() - hyperTrack.getV0().getPt()) / mcTrack.GetPt());
                     std::cout << "ITS track Pt: " << ITStrack.getPt() << std::endl;
-                    std::cout << "ITS track Ref: " << ITStrackMCref[0] << "   " << ITStrackMCref[1] << std::endl;
-                    std::cout << "MC track Pt: " << mcTracksMatrix[v0MCref[0]][v0MCref[1]].GetPt() << std::endl;
+                    std::cout << "Starting hyperTracking algorithm..." << std::endl;
+                    auto isAcc = hyperTrack.process();
+
+                    std::cout << "After processing hyperTracking algorithm..." << std::endl;
+                    hPtResAft->Fill(mcTrack.GetPt(), (mcTrack.GetPt() - hyperTrack.getV0().getPt()) / mcTrack.GetPt());
+
+                    std::cout << "Is accepted? : " << isAcc << std::endl;
+
+                    for (auto i{0}; i < 7; i++)
+                    {
+                        if (ITStrack.isFakeOnLayer(i) && ITStrack.hasHitOnLayer(i))
+                            std::cout << "Fake clusters on layer: " << i << std::endl;
+                    }
+
                     std::cout << "------------------------" << std::endl;
+                    hChi2Sgn->Fill(chi2);
+                    if (isAcc)
+                        hSigBkg->Fill(0.5);
                 }
-                if (ITStrackMCref[0] != -1 && ITStrackMCref != v0MCref)
+                if (ITStrackMCref != v0MCref)
                 {
-                    counter++;
-                    if (counter > 3000)
+                    if (bkg_counter > 20000)
                         continue;
+                    bkg_counter++;
+
                     auto hyperTrack = hyperTracker(ITStrack, v0, ITSclusters, gman, mFitterV0);
+                    hyperTrack.setBz(-5.);
+                    // hyperTrack.setNclusMatching(ITSclusters.size());
+                    hyperTrack.setMaxChi2(40);
+
                     auto chi2 = hyperTrack.getMatchingChi2();
                     if (chi2 > 90 || chi2 == -1)
                         chi2 = 90;
-
+                    auto isAcc = hyperTrack.process();
                     hChi2Bkg->Fill(chi2);
+                    if (isAcc)
+                        hSigBkg->Fill(1.5);
                 }
             }
         }
     }
     auto outFile = TFile("v0sITSmatch.root", "recreate");
+    // efficiency histo
+    hSigBkg->SetBinContent(1, hSigBkg->GetBinContent(1) / sig_counter);
+    hSigBkg->SetBinContent(2, hSigBkg->GetBinContent(2) / bkg_counter);
+    hSigBkg->GetXaxis()->SetBinLabel(1, "Signal");
+    hSigBkg->GetXaxis()->SetBinLabel(2, "Background");
+    hSigBkg->Write();
+    hPtResAft->Write();
+    hPtResBef->Write();
+
+    // chi2 histos
     auto *c = new TCanvas("c1", "chi2", 1000, 400);
     hChi2Bkg->SetStats(0);
     hChi2Sgn->SetLineColor(kRed);
@@ -293,7 +337,7 @@ std::array<int, 2> matchITStracktoMC(const std::vector<std::vector<o2::MCTrack>>
     int trackID, evID, srcID;
     bool fake;
     ITSlabel.get(trackID, evID, srcID, fake);
-    if (!ITSlabel.isNoise() && ITSlabel.isValid() && ITSlabel.isCorrect() && srcID && mcTracksMatrix[evID][trackID].GetPdgCode() == motherPDG)
+    if (!ITSlabel.isNoise() && ITSlabel.isValid() && srcID && mcTracksMatrix[evID][trackID].GetPdgCode() == motherPDG)
     {
         outArray = {evID, trackID};
         // std::cout << "ITS EvID, track Id : " << evID << "   " << trackID << std::endl;
@@ -303,7 +347,7 @@ std::array<int, 2> matchITStracktoMC(const std::vector<std::vector<o2::MCTrack>>
     return outArray;
 }
 
-std::vector<ITSCluster> getTrackClusters(const o2::its::TrackITS &ITStrack,const std::vector<ITSCluster> &ITSClustersArray, std::vector<int> *ITSTrackClusIdx)
+std::vector<ITSCluster> getTrackClusters(const o2::its::TrackITS &ITStrack, const std::vector<ITSCluster> &ITSClustersArray, std::vector<int> *ITSTrackClusIdx)
 {
 
     std::vector<ITSCluster> outVec;
