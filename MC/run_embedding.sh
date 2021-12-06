@@ -9,11 +9,7 @@ NWORKERS=$(grep 'cpu[0-9]' /proc/stat | wc -l)
 
 export O2DPG_ROOT=/home/fmazzasc/alice/O2DPG
 
-<<<<<<< HEAD
 # generate background
-=======
-# #generate background
->>>>>>> Update sim scripts
 
 o2-sim -j ${NWORKERS} -n ${BKGEVENTS} -g pythia8pp -m ${MODULES} -o bkg \
        --configFile $O2DPG_ROOT/MC/config/common/ini/basic.ini \
